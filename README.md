@@ -1,29 +1,27 @@
-# Amazon Ads Products Page → Power BI
+# Amazon Ads Products Report
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![Playwright](https://img.shields.io/badge/browser-Playwright%20Chromium-2EAD33?logo=playwright&logoColor=white)
 ![MySQL](https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white)
-![Schedule](https://img.shields.io/badge/schedule-daily%2014%3A00%20IST-orange)
+![Schedule](https://img.shields.io/badge/schedule-daily%202%20PM%20IST-orange)
 
-This job exports the **Products** page (Advertised products) from Amazon Ads Campaign Manager and loads it into `powerbidb.Products`. Cron runs it once a day at **2 PM IST** for the completed previous day (Yesterday). Nobody needs to click through the pages or upload a CSV.
+This job exports the **Advertised products** report from Amazon Ads every day and loads it into the Power BI database (`powerbidb.Products`). Nobody needs to download or upload anything.
 
-It replaces the manual `products_secondary_upload.py` script. It writes the same table and the same twelve columns, and every load is checked and saved safely.
+It replaces the manual `products_secondary_upload.py` process.
 
 ---
 
 ## Contents
 
-- [At a glance](#at-a-glance)
-- [How it works](#how-it-works)
-- [When it runs](#when-it-runs)
-- [Setup on a Linux server](#setup-on-a-linux-server)
-- [First run: check the page controls](#first-run-check-the-page-controls)
-- [Everyday commands](#everyday-commands)
-- [Checking that it works](#checking-that-it-works)
-- [Troubleshooting](#troubleshooting)
-- [Configuration](#configuration)
-- [Data rules](#data-rules)
-- [Reference](#reference)
+1. [At a glance](#at-a-glance)
+2. [How it works](#how-it-works)
+3. [Server setup](#server-setup)
+4. [Daily use](#daily-use)
+5. [Checking that it works](#checking-that-it-works)
+6. [Troubleshooting](#troubleshooting)
+7. [Configuration](#configuration)
+8. [Data rules](#data-rules)
+9. [Reference](#reference)
 
 ---
 
@@ -31,11 +29,12 @@ It replaces the manual `products_secondary_upload.py` script. It writes the same
 
 | | |
 | --- | --- |
-| **Source** | Amazon Ads → Campaign Manager → **Products** → Advertised products (filter *Clicks: greater than 0*) |
-| **Destination** | MySQL `powerbidb.Products` |
-| **Schedule** | **Yesterday** daily at **14:00 IST** (`python run.py yesterday`). **Today** can be run by hand. |
-| **Run time** | About 2–5 minutes per run |
-| **Safety** | Each date is replaced in **one transaction**. An incomplete or failed run changes nothing. |
+| **Source** | Amazon Ads → Campaign Manager → **Products** → *Advertised products*, filtered on *Clicks: greater than 0* |
+| **Destination** | MySQL table `powerbidb.Products` |
+| **Schedule** | Every day at **2:00 PM IST**, loading **yesterday's** complete data |
+| **Run time** | About 1–3 minutes |
+| **Sign-in** | One OTP during setup. After that, every run uses the saved session. |
+| **Safety** | Each day is replaced in a single transaction. If a run fails, the database doesn't change. |
 
 ---
 
@@ -43,125 +42,129 @@ It replaces the manual `products_secondary_upload.py` script. It writes the same
 
 ```mermaid
 flowchart LR
-    A[Products page<br/>Date range: Today / Yesterday<br/>200 results per page] -->|Export, >, Export, >, …| B[One CSV<br/>per page]
-    B --> C{Checks<br/>columns, repeats,<br/>rows = N results}
-    C -->|OK| D[(MySQL powerbidb.Products<br/>one transaction)]
-    C -->|Problem| X[Stop.<br/>Database untouched]
-    D --> E[Merged CSV saved in<br/>data/reports + archive]
+    A[Amazon Ads<br/>Products page] -->|Yesterday<br/>200 per page<br/>Export| B[CSV export]
+    B --> C{Checks}
+    C -->|Pass| D[(powerbidb.Products)]
+    C -->|Fail| X[Stop<br/>database unchanged]
 ```
 
-Each run does the steps you used to do by hand:
+Each run does the same steps a person would do by hand:
 
-1. **Checks first.** Confirms the `Products` table has every column before opening Amazon.
-2. **Opens the Products page** (`cm/products?entityId=…`, Advertised products tab) and checks that the filter **Clicks: greater than 0** is applied.
-3. **Date range → Today** (or **Yesterday**) **→ Apply**, then checks that the button shows the expected date (e.g. `Date range: Oct 28, 2026`).
-4. **Results per page → 200.**
-5. **Export → next page (>) → Export → …** until the footer `x–y of N results` reaches N.
-6. **Validates.** Every page export has the twelve required columns, no row appears on two pages, and the merged rows equal **N**.
-7. **Saves to MySQL.** Deletes that date's rows and inserts the new ones in **one transaction**. If anything goes wrong, nothing is changed.
-8. **Keeps the files.** The merged CSV goes to `data/reports/Products_today.csv` (or `Products_yesterday.csv`), and the page exports go to `data/archive/`.
+1. **Checks the database.** It confirms the `Products` table is reachable and has the expected columns before it opens Amazon.
+2. **Opens the Products page** with the saved Amazon session. You don't need to sign in or enter an OTP.
+3. **Checks the filters.** The page must show **Clicks: greater than 0**. If someone left another filter on the page (for example *Orders: equals 0*), the run removes it automatically.
+4. **Selects the date.** It picks **Yesterday** under *Date range* and confirms that the page shows the date it expects.
+5. **Exports every product.** It sets *Results per page* to **200**, then clicks *Export* and the next-page arrow until every row has been downloaded.
+6. **Validates the data.** It checks the columns, looks for repeated rows and confirms that the row count matches the page's *"of N results"*.
+7. **Saves the data.** It deletes that date's old rows and inserts the new ones in **one transaction**.
+8. **Keeps a copy.** The final CSV goes to `data/reports/` and a timestamped copy goes to `data/archive/`.
 
----
+### Why 2 PM IST?
 
-## When it runs
-
-Amazon's **Today** and **Yesterday** follow **US time** (Los Angeles). A US day runs from **12:30 PM IST to 12:30 PM IST the next day** (1:30 PM in US winter time). The job stores each load under the US date, exactly as the old script did with `US/Pacific`.
-
-| Command | Date saved |
-| --- | --- |
-| `python run.py yesterday` (cron, **14:00 IST**) | the US day that ended at 12:30 PM IST: **final, complete numbers** |
-| `python run.py today` (by hand) | the US day in progress (partial numbers) |
-
-> **Why Yesterday at 2 PM.** By 2 PM IST the US day has ended (even in US winter time), so the run loads that date's complete numbers.
+Amazon's *Today* and *Yesterday* follow **US Pacific time**. By 2 PM IST the US day has ended (at 12:30 PM IST, or 1:30 PM IST in US winter time), so the run loads complete and final numbers. Each row is stored under the **US date**, as the manual process did.
 
 ---
 
-## Setup on a Linux server
+## Server setup
 
-**You need:** Linux with Python 3.11+, network access to MySQL and Amazon, and an Amazon Ads login with access to the account.
+**Requirements:** a Linux server with Python 3.11 or newer, network access to MySQL and to Amazon, and a phone to receive the Amazon OTP once.
 
-### 1. Copy and install
+### Step 1: Get the code
 
 ```bash
+git clone https://github.com/automationitrendsolution/Amazon-ad-products-report.git ~/Amazon_ad_products_report_cron
 cd ~/Amazon_ad_products_report_cron
+```
+
+> Copying the folder instead? Leave out `.venv/` and `data/session/`. The server creates its own.
+
+### Step 2: Install
+
+```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh     # install uv (once per server)
-uv sync --no-dev                                    # create .venv from uv.lock
+uv sync --no-dev                                    # install Python packages
 uv run playwright install --with-deps chromium      # install the browser
 chmod +x scripts/*.sh
 ```
 
-> Copy the project **without** `.venv/` and `data/session/`. Both are created on the server.
-
-### 2. Configure
+### Step 3: Configure
 
 ```bash
-cp .env.example .env && chmod 600 .env     # then fill in the values
+cp .env.example .env
+chmod 600 .env
+nano .env
 ```
 
-Fill in at least the database login, `AMAZON_ENTITY_ID` (the `entityId=ENTITY…` value in the Products page URL) and the Amazon login. See [Configuration](#configuration).
+Fill in the **MySQL login**, the **Amazon email and password**, and `AMAZON_ENTITY_ID`, which is the `entityId=ENTITY…` part of the Products page URL. Every option is explained inside `.env.example`.
 
-> Running as **root**? Add `BROWSER_NO_SANDBOX=true` to `.env`.
+> **Running as root?** Also set `BROWSER_NO_SANDBOX=true`.
 
-### 3. Sign in to Amazon once
+### Step 4: Sign in to Amazon (one time)
 
 ```bash
 uv run python run.py login
 ```
 
-The job fills in the email and password from `.env`. When Amazon asks for the **verification code (OTP)**, type it in the terminal. It ticks *"Don't require OTP on this browser"*, and the session is saved in `data/session/`. Every scheduled run reuses it, so **cron never asks for an OTP**. If the session lapses, the run signs in again with the email and password.
+The job enters the email and password for you. When Amazon sends the **OTP** to the registered phone, type it into the terminal. The session is saved in `data/session/` and the browser is marked as trusted, so **scheduled runs won't ask for an OTP again**.
 
-> Do this **on the server**. A browser session saved on Windows can't be copied to Linux (Chrome encrypts it per machine).
+> **Sign in on the server itself.** A session saved on Windows doesn't work on Linux, because Chrome encrypts it per machine.
 
-> This project has its **own** session folder. Don't point `SESSION_DIR` at the targeting report's session: two jobs can't open the same browser profile at the same time.
-
-### 4. Test without writing to the database
+### Step 5: Do a test run
 
 ```bash
 uv run python run.py yesterday --dry-run
 ```
 
-This does a full run (all pages exported, checked and converted) but **writes nothing**. It should end with `status : SUCCESS`.
+The test run does everything except write to MySQL. It should finish with:
 
-### 5. Turn on the schedule
+```text
+status             : SUCCESS
+```
+
+### Step 6: Turn on the daily schedule
 
 ```bash
-scripts/install_cron.sh --print   # checks the server (incl. the saved session) and shows the cron entry
-scripts/install_cron.sh           # installs it
-crontab -l                        # confirm
+scripts/install_cron.sh --print    # checks the setup and shows the cron entry
+scripts/install_cron.sh            # installs it
+crontab -l                         # confirm it is there
 ```
 
-The installer converts 14:00 IST into your server's clock:
+The installer converts 2:00 PM IST to the server's own clock:
 
-| Server timezone | Cron expression (14:00 IST) |
+| Server timezone (check with `date`) | Cron expression |
 | --- | --- |
-| Asia/Kolkata | `0 14 * * *` |
+| IST (`Asia/Kolkata`) | `0 14 * * *` |
 | UTC (most cloud servers) | `30 8 * * *` |
 
-The installed line looks like:
+The installed entry looks like this:
 
 ```cron
-0 14 * * * /path/to/Amazon_ad_products_report_cron/scripts/run_products_report.sh yesterday >> /path/to/Amazon_ad_products_report_cron/logs/products_cron.log 2>&1
+0 14 * * * /home/USER/Amazon_ad_products_report_cron/scripts/run_products_report.sh yesterday >> /home/USER/Amazon_ad_products_report_cron/logs/products_cron.log 2>&1
 ```
 
-It only adds or replaces its own entry, so other cron jobs (including the targeting report) aren't touched. If a run is still going when the next one starts, the new run is skipped instead of overlapping.
+The installer adds or replaces only its own entry and leaves other cron jobs alone. If a run is still going when the next one starts, the new one is skipped instead of overlapping.
+
+### Step 7: Retire the old process
+
+Turn off `products_secondary_upload.py` so that only this job writes to `Products`.
+
+**Setup is complete.** ✅
 
 ---
 
-## First run: check the page controls
+## Daily use
 
-The **Products page controls** (Date range, Results per page, Export, the > arrow) are found through `config/selectors.json`. The dry run in step 4 exercises every one of them. If a run stops with `Could not find '<key>'`, a screenshot is saved in `data/screenshots/`. Put a working selector at the **top** of that key's list in `config/selectors.json`; no code change is needed.
+The job runs by itself. Use these commands only when you want to do something by hand:
 
----
-
-## Everyday commands
-
-| I want to… | Command | Writes to MySQL? |
+| I want to… | Command | Writes to the database? |
 | --- | --- | --- |
-| Load **Yesterday** now (the 2 PM job) | `uv run python run.py yesterday` | ✅ yes |
-| Load **Today** now | `uv run python run.py today` | ✅ yes |
-| Run it as a test | `uv run python run.py yesterday --dry-run` | ❌ no |
-| Sign in to Amazon again (OTP) | `uv run python run.py login` | ❌ no |
-| Run the automated tests | `uv run python -m pytest` | ❌ no |
+| Load yesterday's data now | `uv run python run.py yesterday` | ✅ Yes |
+| Load today's data (partial day) | `uv run python run.py today` | ✅ Yes |
+| Test without saving | `uv run python run.py yesterday --dry-run` | ❌ No |
+| Sign in to Amazon again (OTP) | `uv run python run.py login` | ❌ No |
+| Run the automated tests | `uv run python -m pytest` | ❌ No |
+
+> Running the same day twice is safe. The second run replaces the first; it doesn't add duplicates.
 
 ---
 
@@ -170,99 +173,92 @@ The **Products page controls** (Date range, Results per page, Export, the > arro
 ### Logs
 
 ```bash
-tail -f logs/products_cron.log                                         # one START / END line per run
-grep -E "Load-products|Exported|Committed|status" logs/products_report.log | tail
+tail logs/products_cron.log      # one START and one END line per run
+tail -n 30 logs/products_report.log   # full details of the last run
 ```
 
-A good run looks like this:
+A successful run ends with a summary like this:
 
 ```text
-# logs/products_cron.log
-2026-10-29T08:30:01Z (14:00 IST) START products report yesterday (pid 5120)
-2026-10-29T08:33:40Z (14:03 IST) END status=0 SUCCESS yesterday
-
-# logs/products_report.log
-Load-products: Yesterday (2026-10-28) -> powerbidb.Products
-Date range set to Yesterday: 'Date range: Oct 28, 2026'
-Exported 3 page(s) for 2026-10-28 (463 results)
-Committed 2026-10-28: Products 451 deleted / 463 inserted
+Run summary (yesterday)
+  duration           : 87.0s
+  date range         : Yesterday = 2026-10-29
+  exported           : 1 page(s), 479 product row(s) (page shows 479)
+  Products           : 0 deleted, 479 inserted for 2026-10-29
   status             : SUCCESS
 ```
 
 ### Database
 
 ```sql
--- Rows per date
-SELECT Date, COUNT(*) FROM powerbidb.Products GROUP BY Date ORDER BY Date DESC LIMIT 7;
+SELECT Date, COUNT(*) AS products, SUM(Orders) AS orders, ROUND(SUM(`Sales(USD)`), 2) AS sales
+FROM powerbidb.Products
+GROUP BY Date
+ORDER BY Date DESC
+LIMIT 7;
 ```
 
-Each date's row count should equal the `of N results` the Products page shows for that day with the same filter.
-
-> Turn off the old `products_secondary_upload.py` once this is running, so only one tool writes to `Products`.
+Each day's row count should match the *"of N results"* that the Products page shows for that date.
 
 ---
 
 ## Troubleshooting
 
-| You see | What it means | What to do |
+| What you see | What it means | What to do |
 | --- | --- | --- |
-| `AuthenticationError` / `still showing the sign-in page` | The Amazon session expired and Amazon wants a verification code. | Run `uv run python run.py login` and enter the code. |
-| `does not show the filter 'Clicks: greater than 0'` | The filter is no longer applied on the page. | Add it once in a normal browser (Amazon remembers it), or change `REQUIRED_FILTER_TEXT`. |
-| `Could not find 'date_range_button'` (or another key) | Amazon changed that control. | Check the screenshot in `data/screenshots/` and update `config/selectors.json`. |
-| `The Date range shows …, expected …` | The page didn't switch to the right day. | Nothing was exported. Check the screenshot in `data/screenshots/`. |
-| `is missing column(s): … Turn them on in the 'Columns' picker` | A column is hidden on the page, so Export left it out. | Products page → **Columns** → turn it on. |
-| `The page exports hold X row(s) … but the Products page shows N` | A page didn't finish loading before Export. | Retried automatically. If it keeps happening, raise `BROWSER_TIMEOUT_MS`. |
-| `appear on more than one page export` | Export returned the same rows for two pages. | Nothing was saved. Check the page exports in `data/failed/`. |
-| `Non-numeric value(s) for numeric column(s)` | A value doesn't fit a number column in `Products`. | The message names the column and the values. |
-| `SKIPPED` / exit code 11 | The previous run was still going. | Nothing, unless it happens every run. |
+| Exit code **3** / `AuthenticationError` | Amazon wants a new OTP. This is rare, roughly once a year. | Run `uv run python run.py login` on the server and enter the OTP. |
+| `does not show the filter 'Clicks: greater than 0'` | The required filter was removed from the page. | Add it back once in a normal browser (Amazon remembers it), or change `REQUIRED_FILTER_TEXT`. |
+| `Could not find '<name>'` | Amazon changed a button on the page. | Look at the screenshot in `data/screenshots/` and add a working selector at the top of that entry in `config/selectors.json`. No code change is needed. |
+| `The Date range shows …, expected …` | The page didn't switch to the right day. | Nothing was saved. Run it again; check the screenshot if it keeps happening. |
+| `is missing column(s)` | A column is hidden on the Products page. | Products page → **Columns** → turn the column back on. |
+| `exports hold X row(s) … but the page shows N` | A page hadn't finished loading. | The job retries automatically. If it keeps happening, increase `BROWSER_TIMEOUT_MS`. |
+| `SKIPPED` / exit code **11** | The previous run was still running. | Nothing, unless it happens every day. |
 
-Screenshots of any failed browser step are saved in `data/screenshots/`.
+Whenever a browser step fails, a screenshot is saved to `data/screenshots/`. Exports that fail the checks are kept in `data/failed/`.
 
 ---
 
 ## Configuration
 
-All settings live in `.env` (copy `.env.example`, which explains every option). The important ones:
+All settings are in `.env`. Copy them from `.env.example`, which explains each one. The most important ones:
 
-| Setting | What it is |
+| Setting | Purpose |
 | --- | --- |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | MySQL login. `DB_NAME` must be `powerbidb`. |
-| `DB_SSL_CA` | Optional CA file (e.g. `isrgrootx1.pem`, as the old script used). |
-| `AMAZON_ENTITY_ID` | The `entityId=ENTITY…` value from the Products page URL (the advertiser account). |
-| `AMAZON_EMAIL`, `AMAZON_PASSWORD` | Used to sign in again when the session expires. |
+| `AMAZON_ENTITY_ID` | The advertiser account: the `entityId=ENTITY…` part of the Products page URL. |
+| `AMAZON_EMAIL`, `AMAZON_PASSWORD` | Used by `login`, and to sign in again automatically if the session expires. |
 | `AMAZON_ACCOUNT_TIMEZONE` | Amazon's reporting timezone: `America/Los_Angeles` for US accounts. |
-| `REQUIRED_FILTER_TEXT` | Text the page must show before exporting (default `Clicks: greater than 0`). Leave it empty to skip the check. |
-| `RESULTS_PER_PAGE` | `25`, `50`, `100` or `200` (default `200`). |
-| `DB_DATE_FORMAT` | How the date is written if `Products.Date` is a text column (default `%Y-%m-%d`, as the old script wrote it). |
-| `BROWSER_USER_AGENT` | Optional fixed browser identity. If you set it, set it before `login` and never change it. |
+| `REQUIRED_FILTER_TEXT` | The filter the page must show (default: `Clicks: greater than 0`). Leave it empty to skip the check. |
+| `RESULTS_PER_PAGE` | `25`, `50`, `100` or `200` (default: `200`). |
+| `HEADLESS` | Keep `true` on the server. |
+| `BROWSER_NO_SANDBOX` | Set to `true` when the job runs as root. |
 
-The schedule is set when the cron entry is installed, not in `.env`:
+To change the schedule time, reinstall the cron entry with a different time:
 
 ```bash
-CRON_YESTERDAY_TIME="14:00" scripts/install_cron.sh
+CRON_YESTERDAY_TIME="15:00" scripts/install_cron.sh
 ```
 
-> 🔒 `.env` and `data/session/` contain credentials. Keep them out of git (already in `.gitignore`) and readable only by the job's user (`chmod 600 .env`).
+> 🔒 **Security:** `.env` and `data/session/` contain credentials. They are excluded from git, and `.env` must stay readable only by its owner (`chmod 600 .env`).
 
 ---
 
 ## Data rules
 
-The same rules as the old `products_secondary_upload.py`:
-
 | Rule | Detail |
 | --- | --- |
-| Columns | `Date` plus `Products`, `Status`, `Type`, `Sponsored Products eligibility`, `Sales(USD)`, `Conversion rate`, `Impressions`, `Clicks`, `Spend(USD)`, `Orders`, `NTB orders`, `NTB sales(USD)`. Other exported columns are ignored. |
-| Date | The US (Los Angeles) date of the Today or Yesterday preset, written as `YYYY-MM-DD`. |
-| Replace | `DELETE … WHERE Date = <date>` then `INSERT`, in one transaction. |
-| Other table columns | Filled by their defaults (or NULL). A required column with no default stops the run. |
+| **Columns stored** | `Date`, `Products`, `Status`, `Type`, `Sponsored Products eligibility`, `Sales(USD)`, `Impressions`, `Clicks`, `Spend(USD)`, `Orders`, `NTB orders`, `NTB sales(USD)` |
+| **Columns skipped** | Export columns that the table doesn't have (for example `Conversion rate`) are logged and left out. |
+| **Date** | The US Pacific date of the report day, for example `2026-10-29`. |
+| **Numbers** | Converted to plain numbers: `$2,861.76` → `2861.76`, `9.71%` → `9.71`. |
+| **Replace** | `DELETE` that date, then `INSERT` the new rows, in one transaction. |
+| **Empty days** | If the page shows 0 results, the existing rows for that date are kept. |
 
-**Improvements over the old script**
+**Improvements over the manual script:**
 
-1. **Values match the column type.** Numeric columns get numbers (`$2,861.76` → `2861.76`, `9.71%` → `9.71`). Text columns keep the text exactly as exported.
-2. **No partial days.** The merged rows must equal the page's `of N results`. The old script loaded whatever CSVs happened to be in the folder.
-3. **The date is checked on the page**, so an export can't be saved under the wrong day.
-4. **No empty overwrite.** If the page shows 0 results, the date's existing rows are kept.
+- **No partial days.** The row count must match the page's total, or nothing is saved.
+- **No wrong dates.** The date shown on the page is checked before export.
+- **No wrong filters.** Extra filters left on the page are removed automatically.
 
 ---
 
@@ -274,17 +270,17 @@ The same rules as the old `products_secondary_upload.py`:
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
-| 2 | Configuration problem (missing `.env` value) |
+| 2 | Configuration problem (a `.env` value is missing or wrong) |
 | 3 | Amazon sign-in needed: run `python run.py login` |
-| 4 | A page control was not found or the page didn't load (after retries) |
-| 5 | Page not set up as expected (required filter missing) |
+| 4 | The page didn't load or a button wasn't found (after retries) |
+| 5 | The page wasn't set up as expected (required filter missing) |
 | 6 | Export download failed (after retries) |
-| 7 | Not a valid Products export (missing columns, repeated pages) |
-| 8 | A value doesn't fit its numeric column |
+| 7 | The export file isn't valid (missing columns or repeated rows) |
+| 8 | A value doesn't fit its number column |
 | 9 | Database problem (rolled back, nothing changed) |
-| 11 | Previous run still in progress (skipped) |
+| 11 | The previous run was still in progress (skipped) |
 | 14 | The page showed a different date than expected |
-| 15 | The exports didn't add up to the page's result count (after retries) |
+| 15 | The export didn't match the page's result count (after retries) |
 
 </details>
 
@@ -292,40 +288,28 @@ The same rules as the old `products_secondary_upload.py`:
 <summary><b>Project structure</b></summary>
 
 ```text
-run.py                      entry point: today | yesterday | login
+run.py                      Entry point: today | yesterday | login
 app/
-  main.py                   the run: steps, modes, run summary
-  products_page.py          Products page: date range, 200 per page, Export + next page
-  products_csv.py           reads, checks and merges the page exports
-  periods.py                Today / Yesterday -> the US date
+  main.py                   Runs the steps and prints the summary
+  products_page.py          Products page: filters, date range, 200 per page, export
+  products_csv.py           Reads, checks and merges the exports
   database.py               MySQL checks and the single transaction
-  browser.py, auth.py       Chrome session and Amazon sign-in
-  config.py                 reads .env
+  periods.py                Today / Yesterday → US date
+  browser.py, auth.py       Browser session and Amazon sign-in
+  config.py                 Reads .env
 config/
-  selectors.json            how the job finds buttons on Amazon's pages
+  selectors.json            How the job finds buttons on Amazon's pages
 scripts/
-  install_cron.sh           checks the server and installs the daily cron entry
-  run_products_report.sh    cron wrapper: lock, paths, exit status
+  install_cron.sh           Checks the server and installs the daily cron entry
+  run_products_report.sh    Cron wrapper: lock, paths, exit status
 data/
-  reports/                  latest Products_today.csv / Products_yesterday.csv (merged)
-  archive/                  timestamped page exports and merged copies
-  failed/                   page exports that failed the checks
-  session/                  saved Amazon sign-in (treat as a password)
-  screenshots/              screenshots of failed browser steps
+  reports/                  Latest export (Products_yesterday.csv / Products_today.csv)
+  archive/                  Timestamped copies of past exports
+  failed/                   Exports that failed the checks
+  session/                  Saved Amazon sign-in (treat it like a password)
+  screenshots/              Screenshots of failed browser steps
 logs/                       products_report.log, products_cron.log
-tests/                      automated tests (no Amazon, no MySQL needed)
+tests/                      Automated tests (need neither Amazon nor MySQL)
 ```
 
 </details>
-
-<details>
-<summary><b>Testing</b></summary>
-
-| What | Command | Writes to MySQL? |
-| --- | --- | --- |
-| Automated tests | `uv run python -m pytest` | no (uses an in-memory database and a mock Products page) |
-| Full job | `uv run python run.py yesterday --dry-run` | no |
-
-</details>
-#   A m a z o n - a d - p r o d u c t s - r e p o r t  
- 
