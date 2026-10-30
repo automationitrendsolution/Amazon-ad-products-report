@@ -1,0 +1,157 @@
+{
+  "_comment": "Candidate locators, tried in order until one becomes visible. Sign-in/OTP/CAPTCHA entries are carried over from Amazon_ad_targeting_report_cron, where they were verified against the live Amazon pages. The Products page entries are UNVERIFIED best guesses built from the recorded steps: when a run fails naming a key (screenshot in data/screenshots/), put the working selector at the TOP of that key's list. No code change needed. Any Playwright selector engine works: css, xpath=, text=, role=, and '>>' chaining. {label} and {n} are filled in by the code.",
+  "sign_in_marker": [
+    "form[name='signIn']",
+    "#ap_email",
+    "#ap_password",
+    "input[name='email'][type='email']",
+    "text=/Sign in to continue/i"
+  ],
+  "security_challenge_marker": [
+    "form[action*='validateCaptcha']",
+    "#auth-mfa-otpcode",
+    "input[name='otpCode']",
+    "img[alt*='captcha' i]",
+    "text=/Enter the characters you see/i",
+    "text=/Two-Step Verification/i"
+  ],
+  "signin_email_input": [
+    "#ap_email_login",
+    "#ap_email",
+    "input[type='email'][name='email']",
+    "input[name='email']"
+  ],
+  "signin_continue_button": [
+    "#continue",
+    "input#continue",
+    "input.a-button-input[type='submit']",
+    "#continue-announce",
+    "role=button[name=/^continue$/i]"
+  ],
+  "signin_password_input": [
+    "#ap_password",
+    "input[type='password'][name='password']",
+    "input[name='password']"
+  ],
+  "signin_submit_button": [
+    "#signInSubmit",
+    "input#signInSubmit",
+    "role=button[name=/^sign in$/i]"
+  ],
+  "signin_remember_me": [
+    "input[name='rememberMe']",
+    "#rememberMe"
+  ],
+  "signin_error_message": [
+    "#auth-error-message-box",
+    "div.a-alert-error .a-alert-content",
+    "[role='alert'] .a-alert-content"
+  ],
+  "_note_otp": "Amazon's Two-Step Verification page, verified against the live page on 2026-09-19. The OTP box is <input id='auth-mfa-otpcode' name='otpCode' type='tel'>, the submit is <input id='auth-signin-button' name='mfaSubmit'>, and 'Don't require code on this browser' is <input id='auth-mfa-remember-device' name='rememberDevice'>. Ticking that box is what stops later scheduled runs from hitting MFA again, so it matters more than it looks.",
+  "otp_input": [
+    "#auth-mfa-otpcode",
+    "input[name='otpCode']",
+    "input[type='tel'][name*='otp' i]"
+  ],
+  "otp_remember_device": [
+    "#auth-mfa-remember-device",
+    "input[name='rememberDevice']"
+  ],
+  "otp_submit_button": [
+    "#auth-signin-button",
+    "input[name='mfaSubmit']",
+    "input#auth-signin-button"
+  ],
+  "_note_captcha": "Split out of security_challenge_marker: an image CAPTCHA is the one challenge a terminal cannot answer, so the interactive login has to tell it apart from an OTP.",
+  "captcha_marker": [
+    "form[action*='validateCaptcha']",
+    "#auth-captcha-image",
+    "img[alt*='captcha' i]",
+    "text=/Enter the characters you see/i"
+  ],
+  "_note_products": "UNVERIFIED. cm/products?entityId=... : tabs 'Advertised products' / 'All sold products'; toolbar with Filter by, Columns, 'Date range: Oct 28, 2026' and Export; footer with 'Results per page: 25', '1-25 of 463 results' and |< < > >| arrows.",
+  "page_error_marker": [
+    "text=/Sorry, something went wrong/i"
+  ],
+  "products_loaded_marker": [
+    "text=/Results per page/i",
+    "role=grid",
+    "[role='grid']",
+    "table"
+  ],
+  "advertised_products_tab": [
+    "role=tab[name=/^Advertised products/i]",
+    "[role='tab']:has-text('Advertised products')",
+    "text=/^Advertised products$/"
+  ],
+  "_note_filter_tag": "One chip per active filter in the filter bar (verified live 2026-10-30: div#products_view:products_view:filterTag-clicks / -orders). Any chip other than REQUIRED_FILTER_TEXT is removed with its 'remove' button.",
+  "filter_tag": [
+    "[id*=':filterTag-']"
+  ],
+  "filter_tag_remove": [
+    "button:has-text('remove')",
+    "button:has([data-testid='storm-ui-icon-times'])"
+  ],
+  "date_range_button": [
+    "role=button[name=/^Date range/i]",
+    "button:has-text('Date range')",
+    "[aria-label*='date range' i]"
+  ],
+  "_note_date_preset": "Inside the open Date range picker: the preset list on the left (Today, Yesterday, Last 7 days ...). {label} is 'Today' or 'Yesterday'.",
+  "date_preset": [
+    "role=option[name=/^{label}$/i]",
+    "role=menuitem[name=/^{label}$/i]",
+    "role=radio[name=/^{label}$/i]",
+    "role=button[name=/^{label}$/i]",
+    "li:text-is('{label}')",
+    "text=/^{label}$/"
+  ],
+  "date_apply_button": [
+    "role=button[name=/^Apply$/i]",
+    "button:has-text('Apply')"
+  ],
+  "results_per_page_button": [
+    "role=button[name=/Results per page/i]",
+    "button:has-text('Results per page')",
+    "[aria-label*='results per page' i]"
+  ],
+  "_note_results_per_page_option": "Inside the open 'Results per page' list. {n} is RESULTS_PER_PAGE (200).",
+  "results_per_page_option": [
+    "role=option[name=/^{n}$/]",
+    "role=menuitem[name=/^{n}$/]",
+    "role=menuitemradio[name=/^{n}$/]",
+    "li:text-is('{n}')",
+    "[role='listbox'] >> text=/^{n}$/",
+    "text=/^{n}$/"
+  ],
+  "next_page_button": [
+    "role=button[name=/next page/i]",
+    "button[aria-label*='next' i]",
+    "[data-testid*='next' i]",
+    "role=button[name=/^next$/i]"
+  ],
+  "export_button": [
+    "[id$=':export']",
+    "role=button[name=/^Export$/i]",
+    "button:has-text('Export')",
+    "text=/^Export$/"
+  ],
+  "_note_export": "If Export opens a menu or a dialog instead of downloading at once, these are tried while waiting for the file.",
+  "export_menu_item": [
+    "role=menuitem[name=/csv/i]",
+    "role=option[name=/csv/i]",
+    "role=menuitem[name=/export/i]",
+    "[role='menu'] >> text=/csv/i"
+  ],
+  "export_confirm_button": [
+    "[role='dialog'] >> role=button[name=/^(export|download)$/i]",
+    "[role='dialog'] button:has-text('Export')",
+    "[role='dialog'] button:has-text('Download')"
+  ],
+  "loading_indicator": [
+    "[data-testid='storm-ui-icon-spinner']",
+    "[data-testid='skeleton']",
+    "[role='progressbar']",
+    "[aria-busy='true']"
+  ]
+}

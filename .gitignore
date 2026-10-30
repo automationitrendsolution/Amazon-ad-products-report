@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Secrets and session state
+.env
+*.pem
+data/session/
+
+# Runtime output
+data/downloads/*
+data/reports/*
+data/archive/*
+data/failed/*
+data/screenshots/*
+data/*.lock
+logs/*
+!data/**/.gitkeep
+!logs/.gitkeep
