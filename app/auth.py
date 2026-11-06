@@ -242,7 +242,12 @@ def _submit_email(session: BrowserSession, page: Page, settings: Settings) -> No
 
     Amazon serves two layouts: email then password on separate pages, or both
     together.  A missing email field means we are already on the password step.
+    After a password change Amazon shows a "Switch accounts" list first; the
+    configured account is picked there and Amazon goes straight to the password.
     """
+    if _choose_saved_account(page, settings):
+        return
+
     field = find_first(page, "signin_email_input", timeout_ms=5_000)
     if field is None:
         logger.debug("No email field on this page; assuming the password step")
@@ -281,6 +286,34 @@ def _submit_email(session: BrowserSession, page: Page, settings: Settings) -> No
     continue_button.click()
     _settle(page)
     _assert_credentials_accepted(session, page)
+
+
+def _choose_saved_account(page: Page, settings: Settings) -> bool:
+    """Click the configured account on Amazon's "Switch accounts" page, if shown.
+
+    Seen on the live page (2026-11-06) after the Amazon password was changed:
+    the session is ended but the account is remembered, so Amazon lists it
+    instead of asking for the email.  Returns True if an account was chosen.
+    """
+    if not is_present(page, "signin_account_switcher", timeout_ms=3_000):
+        return False
+
+    email = settings.amazon_email or ""
+    account = find_first(page, "signin_account_choice", timeout_ms=5_000, values={"email": email})
+    if account is None:
+        # The list holds other accounts only: "Add account" opens the email form.
+        logger.info("'Switch accounts' does not list %s; adding it", _mask_email(email))
+        account = find_first(page, "signin_add_account", timeout_ms=5_000)
+        if account is None:
+            return False
+        account.click()
+        _settle(page)
+        return False
+
+    logger.info("Choosing %s on Amazon's 'Switch accounts' page", _mask_email(email))
+    account.click()
+    _settle(page)
+    return True
 
 
 def _submit_password(session: BrowserSession, page: Page, settings: Settings) -> None:

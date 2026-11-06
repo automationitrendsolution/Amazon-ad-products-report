@@ -28,6 +28,19 @@
     "#continue-announce",
     "role=button[name=/^continue$/i]"
   ],
+  "_note_account_switcher": "Amazon's 'Switch accounts' page (seen live 2026-11-06, after a password change): a list of remembered accounts, each showing its name and email, plus 'Add account'. {email} is AMAZON_EMAIL.",
+  "signin_account_switcher": [
+    "text=/^Switch accounts$/i"
+  ],
+  "signin_account_choice": [
+    "a:has-text('{email}')",
+    "[role='link']:has-text('{email}')",
+    "text=\"{email}\""
+  ],
+  "signin_add_account": [
+    "a:has-text('Add account')",
+    "text=/^Add account$/i"
+  ],
   "signin_password_input": [
     "#ap_password",
     "input[type='password'][name='password']",

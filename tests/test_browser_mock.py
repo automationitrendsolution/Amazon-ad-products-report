@@ -153,3 +153,39 @@ def test_extra_filter_is_removed_and_the_required_one_kept(products_page):
     products_page.check_required_filter()
     tags = products_page.page.locator("[id*=':filterTag-']")
     assert tags.count() == 1 and tags.first.get_attribute("id") == "v:filterTag-clicks"
+
+
+SWITCH_ACCOUNTS = """<!doctype html><html><body>
+<div id="switcher">
+  <h1>Switch accounts</h1>
+  <a href="#" id="other"><div>Someone</div><div>other@example.com</div></a>
+  <a href="#" id="mine"><div>Ads</div><div>ads@example.com</div></a>
+  <a href="#">Add account</a>
+</div>
+<form id="password-step" hidden>
+  <input type="password" id="ap_password" name="password">
+  <input type="submit" id="signInSubmit" value="Sign in">
+</form>
+<script>
+const form = document.getElementById('password-step');
+document.getElementById('mine').onclick = (e) => {
+  e.preventDefault();
+  document.getElementById('switcher').remove();
+  form.hidden = false;
+};
+form.onsubmit = (e) => {
+  e.preventDefault();
+  document.body.dataset.signedIn = document.getElementById('ap_password').value;
+};
+</script></body></html>"""
+
+
+def test_switch_accounts_page_picks_the_configured_account(products_page, settings, monkeypatch):
+    from dataclasses import replace
+
+    from app.auth import sign_in_interactive
+
+    creds = replace(settings, amazon_email="ads@example.com", amazon_password="new-password")
+    products_page.page.set_content(SWITCH_ACCOUNTS)
+    sign_in_interactive(products_page.session, creds, prompt=lambda _: "", announce=lambda _: None)
+    assert products_page.page.locator("body").get_attribute("data-signed-in") == "new-password"
