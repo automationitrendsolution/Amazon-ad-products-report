@@ -424,8 +424,15 @@ class ProductsPage:
             )
         preset.click()
         apply = find_first(self.page, "date_apply_button", timeout_ms=3_000)
-        if apply is not None and apply.is_enabled():
-            apply.click()
+        if apply is not None:
+            # Seen on the server (2026-11-06): the picker applied the preset and
+            # closed by itself, and waiting on the vanished Apply button took the
+            # full browser timeout.  The date shown is checked below either way.
+            try:
+                if apply.is_enabled(timeout=3_000):
+                    apply.click(timeout=5_000)
+            except PlaywrightError:
+                logger.info("Apply button went away after choosing %s; the picker applied it", period.preset_label)
         self.page.wait_for_timeout(1_000)
         self._wait_for_idle()
 
