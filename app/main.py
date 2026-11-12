@@ -33,6 +33,7 @@ from .exceptions import (
     AuthenticationError,
     DatabaseError,
     NavigationError,
+    NotCumulativeExportError,
 )
 from .logging_config import get_logger
 from .maintenance import cleanup_old_files
@@ -142,6 +143,8 @@ class ProductsReportPipeline:
             lambda: build_products_table(settings.database, date_format=settings.db_date_format)
         )
         self._export_fn = export_fn or self._browser_export
+        #: Set once Export proves not cumulative; later attempts export every page.
+        self._page_by_page = False
 
     # -- entry point -------------------------------------------------------
 
@@ -265,11 +268,15 @@ class ProductsReportPipeline:
     def _browser_export(self, period: ResolvedPeriod) -> PagedExport:
         """One attempt: open, choose the date, 200 per page, export every page."""
         with BrowserSession(self.settings) as session:
-            products = ProductsPage(session, self.settings)
+            products = ProductsPage(session, self.settings, page_by_page=self._page_by_page)
             products.open()
             products.select_period(period)
             products.set_results_per_page(self.settings.results_per_page)
-            return products.export_all(period)
+            try:
+                return products.export_all(period)
+            except NotCumulativeExportError:
+                self._page_by_page = True
+                raise
 
     def _retry(self, description: str, operation: Callable[[], T]) -> T:
         return retry_call(

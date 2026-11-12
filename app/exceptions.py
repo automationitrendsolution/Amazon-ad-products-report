@@ -59,6 +59,10 @@ class DownloadError(AdFlowError):
     exit_code = 6
 
 
+class NotCumulativeExportError(DownloadError):
+    """The last page's Export did not hold every row; retry page by page."""
+
+
 class CSVValidationError(AdFlowError):
     """An exported file is not a usable Products export."""
 

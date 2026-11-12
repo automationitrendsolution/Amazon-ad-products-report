@@ -14,7 +14,7 @@ from datetime import date
 import pytest
 
 from app.browser import BrowserSession
-from app.exceptions import DateMismatchError
+from app.exceptions import DateMismatchError, NotCumulativeExportError
 from app.periods import ResolvedPeriod
 from app.products_csv import combine_exports
 from app.products_page import ProductsPage
@@ -103,6 +103,7 @@ def products_page(settings):
 
 def test_exports_every_page_of_yesterday(products_page):
     products_page.page.set_content(mock_page())
+    products_page.page_by_page = True
     yesterday = ResolvedPeriod("yesterday", date(2026, 10, 28))
 
     products_page.check_required_filter()
@@ -117,7 +118,7 @@ def test_exports_every_page_of_yesterday(products_page):
     assert export.frame["Products"].iloc[[0, 200, -1]].tolist() == ["Product 1", "Product 201", "Product 437"]
 
 
-def test_cumulative_export_uses_the_export_that_holds_every_row(products_page, settings):
+def test_cumulative_export_is_taken_once_from_the_last_page(products_page, settings):
     products_page.page.set_content(mock_page(cumulative=True))
     yesterday = ResolvedPeriod("yesterday", date(2026, 10, 28))
 
@@ -126,9 +127,33 @@ def test_cumulative_export_uses_the_export_that_holds_every_row(products_page, s
     paged = products_page.export_all(yesterday)
 
     assert len(paged.files) == 1 and "p03" in paged.files[0].path.name
-    assert [f.name for f in settings.download_dir.glob("*.csv")] == [paged.files[0].path.name]  # partials removed
+    assert [f.name for f in settings.download_dir.glob("*.csv")] == [paged.files[0].path.name]  # one Export only
     export = combine_exports(paged.paths, expected_total=paged.total)
     assert export.row_count == PRODUCTS
+
+
+def test_cumulative_export_page_by_page_keeps_the_export_that_holds_every_row(products_page, settings):
+    products_page.page.set_content(mock_page(cumulative=True))
+    products_page.page_by_page = True
+    yesterday = ResolvedPeriod("yesterday", date(2026, 10, 28))
+
+    products_page.select_period(yesterday)
+    products_page.set_results_per_page(200)
+    paged = products_page.export_all(yesterday)
+
+    assert len(paged.files) == 1 and "p03" in paged.files[0].path.name
+    assert [f.name for f in settings.download_dir.glob("*.csv")] == [paged.files[0].path.name]  # partials removed
+
+
+def test_last_page_export_missing_rows_asks_for_page_by_page(products_page, settings):
+    products_page.page.set_content(mock_page())  # Export holds the visible page only
+    yesterday = ResolvedPeriod("yesterday", date(2026, 10, 28))
+
+    products_page.select_period(yesterday)
+    products_page.set_results_per_page(200)
+    with pytest.raises(NotCumulativeExportError):
+        products_page.export_all(yesterday)
+    assert not list(settings.download_dir.glob("*.csv"))
 
 
 def test_wrong_date_on_the_page_stops_before_export(products_page):
@@ -189,3 +214,19 @@ def test_switch_accounts_page_picks_the_configured_account(products_page, settin
     products_page.page.set_content(SWITCH_ACCOUNTS)
     sign_in_interactive(products_page.session, creds, prompt=lambda _: "", announce=lambda _: None)
     assert products_page.page.locator("body").get_attribute("data-signed-in") == "new-password"
+
+
+def test_small_table_without_a_footer_is_exported_from_its_only_page(products_page):
+    # Amazon hides "Results per page" and "x-y of N results" when every row fits on one page.
+    small = mock_page().replace("const TOTAL = 437", "const TOTAL = 8").replace(
+        "<body>", "<body><style>#perpage, #footer, #next { display: none; }</style>"
+    )
+    products_page.page.set_content(small)
+    yesterday = ResolvedPeriod("yesterday", date(2026, 10, 28))
+
+    products_page.select_period(yesterday)
+    products_page.set_results_per_page(200)
+    paged = products_page.export_all(yesterday)
+
+    assert paged.total == 8 and len(paged.files) == 1
+    assert combine_exports(paged.paths, expected_total=paged.total).row_count == 8

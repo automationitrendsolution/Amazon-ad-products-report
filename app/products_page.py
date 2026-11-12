@@ -45,6 +45,7 @@ from .exceptions import (
     DateMismatchError,
     DownloadError,
     NavigationError,
+    NotCumulativeExportError,
     PageSetupError,
 )
 from .logging_config import get_logger
@@ -159,9 +160,12 @@ class ProductsPage:
     #: one clicked 11 s after did.
     export_gap_s: float = 10.0
 
-    def __init__(self, session: BrowserSession, settings: Settings) -> None:
+    def __init__(self, session: BrowserSession, settings: Settings, *, page_by_page: bool = False) -> None:
         self.session = session
         self.settings = settings
+        #: Export every page instead of only the last one (the fallback when
+        #: Export turns out not to be cumulative).
+        self.page_by_page = page_by_page
         self._last_export_at: float | None = None
 
     @property
@@ -452,7 +456,14 @@ class ProductsPage:
         return parse_range(self._body_text())
 
     def set_results_per_page(self, size: int) -> None:
-        button = self._require("results_per_page_button")
+        button = find_first(self.page, "results_per_page_button", timeout_ms=10_000)
+        if button is None and self.pagination() is None:
+            # Seen live 2026-11-12 (Today, 8 products): when every result fits
+            # on one page Amazon hides the whole footer, this control included.
+            logger.info("No table footer: every result is on one page, so there is no 'Results per page'")
+            return
+        if button is None:
+            button = self._require("results_per_page_button")
         try:
             current = parse_per_page(button.inner_text(timeout=2_000))
         except Exception:
@@ -481,15 +492,23 @@ class ProductsPage:
     # -- export -----------------------------------------------------------------
 
     def export_all(self, period: ResolvedPeriod) -> PagedExport:
-        """Export page 1, click >, export page 2, ... until the last page.
+        """Export every row: once from the last page, or page by page.
 
         Amazon's Export is cumulative: on page k it downloads rows 1 to the end
         of page k (seen live 2026-10-30: page 2 of 289 exported all 289).  So
-        as soon as one export holds every result, it alone is the export and
-        the partial ones before it are discarded.
+        the table is paged to the end and exported once -- one Export instead
+        of one per page, which the server kept failing on (2026-11-12: page 2's
+        Export never produced a file).  If that export misses rows, Export is
+        no longer cumulative and NotCumulativeExportError asks for a retry with
+        ``page_by_page``.
+
+        Page by page: as soon as one export holds every result, it alone is the
+        export and the partial ones before it are discarded.
         """
         shown = self.pagination()
         if shown is None:
+            if find_first(self.page, "results_per_page_button", timeout_ms=2_000) is None:
+                return self._export_single_page(period)
             self.session.capture_failure("pagination-label-missing")
             raise NavigationError("Could not read the 'x-y of N results' label under the Products table")
         result = PagedExport(total=shown.total)
@@ -498,6 +517,9 @@ class ProductsPage:
             return result
         if shown.first != 1:
             raise NavigationError(f"The table starts at row {shown.first}, expected 1 after changing the date")
+
+        if not self.page_by_page:
+            return self._export_from_last_page(period, shown, result)
 
         for number in range(1, self.settings.max_pages + 1):
             logger.info("Page %d: exporting rows %d-%d of %d", number, shown.first, shown.last, shown.total)
@@ -518,6 +540,43 @@ class ProductsPage:
                 f"Stopped after MAX_PAGES={self.settings.max_pages} pages without reaching the last one"
             )
         logger.info("Exported %d page(s) for %s (%d results)", len(result.files), period.report_date, result.total)
+        return result
+
+    def _export_single_page(self, period: ResolvedPeriod) -> PagedExport:
+        """No footer at all: every result is on this one page, so its export is all of them.
+
+        There is no "of N results" to check against, so the export's own row
+        count is the total.  No rows means nothing is loaded and the date's
+        existing rows are kept.
+        """
+        exported = self.export_current_page(period, 1)
+        rows = len(read_export(exported.path))
+        logger.info("No table footer: exported all %d result(s) for %s from the only page", rows, period.report_date)
+        if rows == 0:
+            exported.path.unlink(missing_ok=True)
+            return PagedExport(total=0)
+        return PagedExport(files=[exported], total=rows)
+
+    def _export_from_last_page(self, period: ResolvedPeriod, shown: PageRange, result: PagedExport) -> PagedExport:
+        number = 1
+        while not shown.is_last:
+            if number >= self.settings.max_pages:
+                raise NavigationError(
+                    f"Stopped after MAX_PAGES={self.settings.max_pages} pages without reaching the last one"
+                )
+            shown = self.next_page(shown)
+            number += 1
+        logger.info("Page %d (last): exporting rows 1-%d of %d", number, shown.last, shown.total)
+        exported = self.export_current_page(period, number)
+        rows = len(read_export(exported.path))
+        if rows < shown.total:
+            exported.path.unlink(missing_ok=True)
+            raise NotCumulativeExportError(
+                f"The export from the last page holds {rows} of {shown.total} rows; Export is not "
+                "cumulative any more, so the next attempt exports page by page."
+            )
+        result.files = [exported]
+        logger.info("Exported all %d results for %s from page %d", rows, period.report_date, number)
         return result
 
     def next_page(self, current: PageRange) -> PageRange:
